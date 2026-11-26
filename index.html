@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tumbler</title>
+  <link rel="stylesheet" href="./client/style.css">
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three/build/three.module.js", "three/addons/": "./vendor/three/examples/jsm/" } }
+  </script>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="hud" hidden>
+    <div id="banner" class="panel">
+      <div id="phase"></div>
+      <div id="sub"></div>
+      <div id="timerbar"><div id="timerfill"></div></div>
+    </div>
+    <div id="roster" class="panel"></div>
+    <div id="power" class="panel">
+      <button id="pwUp" aria-label="Raise power">&#9650;</button>
+      <div class="bar"><div id="pwFill"></div></div>
+      <button id="pwDown" aria-label="Lower power">&#9660;</button>
+      <div id="pwPct">50%</div>
+      <div id="pwDist">7.0 m</div>
+      <button id="launch" class="primary">Launch <small>Space</small></button>
+    </div>
+    <div id="bigcount"></div>
+    <div id="help">Mouse: aim &middot; &uarr;/&darr; or wheel: power &middot; Space: launch &middot; click the game to capture the mouse (Esc frees it)</div>
+  </div>
+
+  <div id="end" class="overlay" hidden>
+    <div class="card">
+      <h2 id="endTitle"></h2>
+      <p id="endSub"></p>
+      <div class="row">
+        <button id="endAgain" class="primary">Play again</button>
+        <button id="endMenu">Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="lobby" class="overlay" hidden>
+    <div class="card">
+      <h2>Room <span id="lobbyCode"></span></h2>
+      <p id="lobbyShare" class="muted"></p>
+      <ul id="lobbyList"></ul>
+      <p id="lobbyNote" class="muted"></p>
+      <div class="row">
+        <button id="lobbyStart" class="primary">Start match</button>
+        <button id="lobbyLeave">Leave</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="menu" class="overlay">
+    <div class="card">
+      <h1>Tumbler</h1>
+      <p class="tag">Slide. Bump. Last duck standing.</p>
+      <label>Your name <input id="nameInput" maxlength="16" autocomplete="off"></label>
+      <button id="btnOffline" class="primary" disabled>Play vs bots</button>
+      <div class="divider"><span>or play online</span></div>
+      <div class="row"><button id="btnCreate" disabled>Create room</button></div>
+      <div class="row">
+        <input id="codeInput" maxlength="4" placeholder="CODE" autocomplete="off">
+        <button id="btnJoin" disabled>Join</button>
+      </div>
+      <p id="menuStatus" class="status">Loading models&hellip;</p>
+    </div>
+  </div>
+
+  <div id="fatal" class="overlay" hidden>
+    <div class="card"><h2>Something broke</h2><p id="fatalMsg"></p></div>
+  </div>
+
+  <script type="module" src="./client/main.js"></script>
+</body>
+</html>

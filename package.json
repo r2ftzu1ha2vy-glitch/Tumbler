@@ -1,0 +1,19 @@
+{
+  "name": "tumbler",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Tumbler: slide your duck, knock the others off the grid. Last duck standing wins.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/server.js",
+    "test": "node --test",
+    "serve:static": "npx --yes serve@14.2.4 ."
+  },
+  "dependencies": {
+    "ws": "8.16.0"
+  },
+  "devDependencies": {}
+}
