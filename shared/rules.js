@@ -5,6 +5,16 @@ export function clampPower(power, cfg = CONFIG) {
   return Math.min(1, Math.max(cfg.MIN_POWER, power));
 }
 
+// Power is a level 1..POWER_LEVELS (level / POWER_LEVELS of full power). Everything that accepts a
+// power snaps it to a level, so humans and bots are on the same ladder.
+export function quantizePower(power, cfg = CONFIG) {
+  return clampPower(Math.round(power * cfg.POWER_LEVELS) / cfg.POWER_LEVELS, cfg);
+}
+
+export function powerToLevel(power, cfg = CONFIG) {
+  return Math.round(quantizePower(power, cfg) * cfg.POWER_LEVELS);
+}
+
 // Wraps to (-PI, PI].
 export function normalizeYaw(yaw) {
   const full = Math.PI * 2;
