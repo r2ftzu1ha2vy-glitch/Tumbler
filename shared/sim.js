@@ -2,14 +2,15 @@
 // and on the Node server (online rooms) from this one file.
 //
 // Match flow:
-//   COUNTDOWN (5 s, nobody on the grid) -> everyone teleports to a random spot
+//   COUNTDOWN (5 s). Ducks wait on the lobby platform (spawned a few metres up, they drop onto it).
+//             At 0 everyone teleports to a random spot on the grid.
 //   PLANNING  (aim + power, lock in or timer) -> SLIDING (all ducks slide at once, can bump each other)
 //   -> back to PLANNING while 2+ ducks are alive, else GAMEOVER.
 // A duck whose centre leaves the grid footprint is out.
 import { CONFIG } from './config.js';
 import { edgeDistance, isOnGrid } from './grid.js';
 import { createRng, randomSeed } from './rng.js';
-import { aimDir, clampPower, launchSpeed, normalizeYaw, slideDistance } from './rules.js';
+import { aimDir, launchSpeed, normalizeYaw, quantizePower, slideDistance } from './rules.js';
 import { botBeginPlanning, botTick } from './bot.js';
 
 export const PHASE = Object.freeze({
@@ -32,13 +33,15 @@ export function fillWithBots(humans, cfg = CONFIG) {
   return list;
 }
 
-export function createSim({ grid, players, seed = randomSeed(), cfg = CONFIG }) {
+// `lobby` is optional: { spawn: {cx, cz, hx, hz, top} } from lobbyFromGltfJson. Without it the countdown is empty.
+export function createSim({ grid, lobby = null, players, seed = randomSeed(), cfg = CONFIG }) {
   if (!Array.isArray(players) || players.length < 2) throw new Error('a match needs at least 2 players');
   const ids = new Set(players.map((p) => String(p.id)));
   if (ids.size !== players.length) throw new Error('player ids must be unique');
   const sim = {
     cfg,
     grid,
+    lobby,
     rng: createRng(seed),
     seed,
     phase: PHASE.COUNTDOWN,
@@ -56,6 +59,7 @@ export function createSim({ grid, players, seed = randomSeed(), cfg = CONFIG }) 
       ci: i,
       alive: true,
       placed: false,
+      inLobby: false,
       gone: false,
       locked: false,
       x: 0,
@@ -65,13 +69,35 @@ export function createSim({ grid, players, seed = randomSeed(), cfg = CONFIG }) 
       vz: 0,
       vy: 0,
       yaw: 0,
+      faceYaw: 0, // the facing other players are shown while this duck is still planning
       power: cfg.DEFAULT_POWER,
       fellAt: -1,
       bot: null,
     })),
   };
+  if (lobby) placeInLobby(sim);
   sim.events.push({ type: 'phase', phase: sim.phase, round: 0 });
   return sim;
+}
+
+// Lobby arrival: random spots on the Spawn_Lobby platform, LOBBY_SPAWN_DROP_M above it so ducks never
+// start inside the platform or inside each other; gravity drops them onto it. Facing +Z (toward the map pads).
+function placeInLobby(sim) {
+  const s = sim.lobby.spawn;
+  const lobbyGrid = { tiles: [{ cx: s.cx, cz: s.cz, hx: s.hx, hz: s.hz, top: s.top }], top: s.top };
+  const placed = [];
+  for (const p of sim.players) {
+    const c = pickSpawn(sim, placed, lobbyGrid);
+    placed.push(c);
+    p.x = c.x;
+    p.z = c.z;
+    p.y = s.top + sim.cfg.LOBBY_SPAWN_DROP_M;
+    p.vy = 0;
+    p.yaw = 0;
+    p.faceYaw = 0;
+    p.placed = true;
+    p.inLobby = true;
+  }
 }
 
 export function aliveCount(sim) {
@@ -94,7 +120,7 @@ export function applyInput(sim, id, input) {
   const p = sim.players.find((q) => q.id === id);
   if (!p || p.isBot || !p.alive || sim.phase !== PHASE.PLANNING) return false;
   if (!input || typeof input !== 'object') return false;
-  if (typeof input.power === 'number' && Number.isFinite(input.power)) p.power = clampPower(input.power, sim.cfg);
+  if (typeof input.power === 'number' && Number.isFinite(input.power)) p.power = quantizePower(input.power, sim.cfg);
   if (typeof input.yaw === 'number' && Number.isFinite(input.yaw)) p.yaw = normalizeYaw(input.yaw);
   if (typeof input.lock === 'boolean') p.locked = input.lock;
   return true;
@@ -114,6 +140,16 @@ export function advance(sim, dt) {
 function tick(sim, h) {
   const { cfg, grid } = sim;
   sim.time += h;
+
+  // Lobby ducks fall onto the platform.
+  if (sim.lobby) {
+    for (const p of sim.players) {
+      if (!p.inLobby || p.y <= sim.lobby.spawn.top) continue;
+      p.vy -= cfg.GRAVITY_MPS2 * h;
+      p.y = Math.max(sim.lobby.spawn.top, p.y + p.vy * h);
+      if (p.y === sim.lobby.spawn.top) p.vy = 0;
+    }
+  }
 
   // Ducks that already left the grid keep falling in every phase.
   for (const p of sim.players) {
@@ -164,6 +200,7 @@ function beginPlanning(sim) {
   setPhase(sim, PHASE.PLANNING, sim.cfg.PLAN_TIME_S);
   for (const p of sim.players) {
     if (!p.alive) continue;
+    p.faceYaw = p.yaw;
     p.locked = false;
     p.vx = 0;
     p.vz = 0;
@@ -177,6 +214,7 @@ function beginSliding(sim) {
   sim.slideTime = 0;
   for (const p of sim.players) {
     if (!p.alive) continue;
+    p.power = quantizePower(p.power, sim.cfg);
     const dir = aimDir(p.yaw);
     const v0 = launchSpeed(slideDistance(p.power, sim.cfg), sim.cfg);
     p.vx = dir.x * v0;
@@ -296,8 +334,8 @@ function endSlide(sim) {
   sim.events.push({ type: 'gameover', winnerId: sim.winnerId });
 }
 
-function randomPointOnGrid(sim) {
-  const tiles = sim.grid.tiles;
+function randomPointOnGrid(sim, g) {
+  const tiles = g.tiles;
   let total = 0;
   for (const t of tiles) total += t.hx * t.hz;
   let pick = sim.rng.next() * total;
@@ -315,41 +353,48 @@ function randomPointOnGrid(sim) {
   };
 }
 
-function pickSpawn(sim, placed) {
-  const { cfg, grid } = sim;
+function pickSpawn(sim, placed, g) {
+  const { cfg } = sim;
   let sep = cfg.SPAWN_MIN_SEPARATION_M;
   for (let relax = 0; relax < 6; relax++) {
     for (let i = 0; i < 200; i++) {
-      const c = randomPointOnGrid(sim);
-      if (edgeDistance(grid, c.x, c.z, 16, cfg.SPAWN_EDGE_MARGIN_M + 0.5) < cfg.SPAWN_EDGE_MARGIN_M) continue;
+      const c = randomPointOnGrid(sim, g);
+      if (edgeDistance(g, c.x, c.z, 16, cfg.SPAWN_EDGE_MARGIN_M + 0.5) < cfg.SPAWN_EDGE_MARGIN_M) continue;
       if (placed.every((q) => Math.hypot(q.x - c.x, q.z - c.z) >= sep)) return c;
     }
     sep /= 2;
   }
-  return randomPointOnGrid(sim);
+  return randomPointOnGrid(sim, g);
 }
 
 function teleportAll(sim) {
   const placed = [];
   for (const p of sim.players) {
-    if (!p.alive || p.placed) continue;
-    const c = pickSpawn(sim, placed);
+    if (!p.alive || (p.placed && !p.inLobby)) continue;
+    const c = pickSpawn(sim, placed, sim.grid);
     placed.push(c);
     p.x = c.x;
     p.z = c.z;
     p.y = sim.grid.top;
+    p.vy = 0;
     p.yaw = Math.atan2(-c.x, -c.z); // start facing the middle of the grid
+    p.faceYaw = p.yaw;
     p.placed = true;
+    p.inLobby = false;
     sim.events.push({ type: 'teleport', id: p.id, x: p.x, z: p.z, yaw: p.yaw });
   }
 }
 
 const r3 = (v) => Math.round(v * 1000) / 1000;
 
-// JSON-safe view of the match. Drains the pending event list into the returned object.
-export function snapshot(sim) {
+// JSON-safe view of the match for one viewer. While players are still planning, everyone except
+// the viewer is shown with their previous facing and power 0, so nobody can read another player's
+// plan (the server builds one snapshot per client, so this holds over the network too).
+// `drain` empties the pending event list; pass false to build several snapshots from one batch.
+export function snapshot(sim, viewerId = null, drain = true) {
   const events = sim.events;
-  sim.events = [];
+  if (drain) sim.events = [];
+  const planning = sim.phase === PHASE.PLANNING;
   return {
     phase: sim.phase,
     timer: Math.max(0, r3(sim.timer)),
@@ -357,22 +402,26 @@ export function snapshot(sim) {
     planTime: sim.cfg.PLAN_TIME_S,
     winnerId: sim.winnerId,
     events,
-    players: sim.players.map((p) => ({
-      id: p.id,
-      name: p.name,
-      isBot: p.isBot,
-      ci: p.ci,
-      alive: p.alive,
-      placed: p.placed,
-      gone: p.gone,
-      locked: p.locked,
-      x: r3(p.x),
-      y: r3(p.y),
-      z: r3(p.z),
-      vx: r3(p.vx),
-      vz: r3(p.vz),
-      yaw: r3(p.yaw),
-      power: r3(p.power),
-    })),
+    players: sim.players.map((p) => {
+      const secret = planning && p.id !== viewerId;
+      return {
+        id: p.id,
+        name: p.name,
+        isBot: p.isBot,
+        ci: p.ci,
+        alive: p.alive,
+        placed: p.placed,
+        inLobby: p.inLobby,
+        gone: p.gone,
+        locked: p.locked,
+        x: r3(p.x),
+        y: r3(p.y),
+        z: r3(p.z),
+        vx: r3(p.vx),
+        vz: r3(p.vz),
+        yaw: r3(secret ? p.faceYaw : p.yaw),
+        power: secret ? 0 : r3(p.power),
+      };
+    }),
   };
 }
