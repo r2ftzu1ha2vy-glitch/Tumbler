@@ -15,7 +15,8 @@ export const CONFIG = Object.freeze({
 
   PLAN_TIME_S: 12,         // [DESIGN] aim + power phase length before everyone slides
   DEFAULT_POWER: 0.5,      // [DESIGN]
-  MIN_POWER: 0.1,          // [DESIGN] floor so nobody can stall a match at 0 distance
+  POWER_LEVELS: 10,        // [USER] power is 1..10, level 1 = 10 %, level 10 = 100 % (players are only shown 1..10)
+  MIN_POWER: 0.1,          // [USER] = level 1 (must equal 1 / POWER_LEVELS)
   MAX_SLIDE_M: 14,         // [DESIGN] power 1.0 = 14 m of travel on an unobstructed slide (grid is 15 m wide [GLB])
   FRICTION_MPS2: 6,        // [DESIGN] constant deceleration while sliding; with MAX_SLIDE_M gives ~13 m/s launch
   DUCK_RADIUS_M: 0.4,      // [DESIGN] collision circle; duck footprint from the GLB is x +-0.367, z -0.5..+0.6875
@@ -25,6 +26,7 @@ export const CONFIG = Object.freeze({
   SETTLE_SPEED_MPS: 0.05,  // [DESIGN] below this everything counts as stopped
   SLIDE_MAX_S: 8,          // [DESIGN] hard cap on one slide phase
 
+  LOBBY_SPAWN_DROP_M: 3,         // [USER] "few units higher so they dont get stuck": 3 m is my reading of "few"
   SPAWN_EDGE_MARGIN_M: 1.2,      // [DESIGN] teleport spawns at least this far from any edge
   SPAWN_MIN_SEPARATION_M: 2.0,   // [DESIGN] and at least this far from each other (relaxed if the grid is too crowded)
 
@@ -39,14 +41,17 @@ export const CONFIG = Object.freeze({
   SNAPSHOT_HZ: 20,         // [DESIGN] server -> client snapshot rate
   INTERP_DELAY_MS: 100,    // [DESIGN] client render delay for snapshot interpolation
 
-  POWER_RATE_PER_S: 0.45,  // [DESIGN] power change per second while up/down is held
-  POWER_WHEEL_STEP: 0.05,  // [DESIGN] power change per mouse-wheel notch
+  KEY_REPEAT_DELAY_MS: 260, // [DESIGN] hold up/down: delay before the level starts repeating
+  KEY_REPEAT_MS: 120,       // [DESIGN] hold up/down: time between repeated level steps
   MOUSE_SENS_RAD_PER_PX: 0.0026, // [DESIGN] uncalibrated mouse sensitivity
 });
 
 export const ASSETS = Object.freeze({
   GRID_GLB: './assets/Grid.glb',
   DUCK_GLB: './assets/TumblerDuck.glb',
+  LOBBY_GLB: './assets/Lobby.glb',
+  // [GLB] Lobby.glb node "Spawn_Lobby": 15 x 10 m platform, top y=0.7. Map Selection / Map1-3 / Shop are drawn only.
+  LOBBY_SPAWN_NODE: 'Spawn_Lobby',
   // [GLB] clip names exist in TumblerDuck.glb: idle (3.0 s, loop), sit_down (1.0 s), stand_up (1.0 s).
   // sit_down lowers the body 0.25 m and lifts the legs (belly-slide pose); stand_up is the exact reverse.
   DUCK_ANIMS: Object.freeze({ IDLE: 'idle', SIT: 'sit_down', STAND: 'stand_up' }),
