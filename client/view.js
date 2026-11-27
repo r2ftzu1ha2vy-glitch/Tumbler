@@ -53,6 +53,13 @@ export function createView(canvas, assets) {
     if (o.isMesh) o.receiveShadow = true;
   });
   scene.add(assets.gridScene);
+  // The lobby and the grid are authored in the same coordinate frame and overlap, so only one is shown at a time.
+  assets.lobbyScene.traverse((o) => {
+    if (o.isMesh) o.receiveShadow = true;
+  });
+  scene.add(assets.lobbyScene);
+  assets.lobbyScene.visible = false;
+  const lobbyTop = assets.lobby.spawn.top;
 
   const water = new THREE.Mesh(
     new THREE.PlaneGeometry(600, 600),
@@ -124,7 +131,7 @@ export function createView(canvas, assets) {
 
     const v = {
       root, model, mixer, actions, ring, labelCanvas, labelTex,
-      labelKey: '', anim: null, wasPlaced: false, spawnT: 0, splashed: false,
+      labelKey: '', anim: null, wasPlaced: false, wasInLobby: false, spawnT: 0, splashed: false,
     };
     mixer.addEventListener('finished', (e) => {
       if (e.action === actions.STAND && v.anim === 'STAND') setAnim(v, 'IDLE');
@@ -281,6 +288,10 @@ export function createView(canvas, assets) {
   function render(state, ctx, dt) {
     const me = state.players.find((p) => p.id === ctx.myId);
 
+    const inLobby = state.players.some((p) => p.inLobby);
+    assets.lobbyScene.visible = inLobby;
+    assets.gridScene.visible = !inLobby;
+
     for (const p of state.players) {
       let v = visuals.get(p.id);
       if (!v) {
@@ -295,11 +306,13 @@ export function createView(canvas, assets) {
         v.wasPlaced = p.placed && !p.gone;
         continue;
       }
-      if (!v.wasPlaced) {
+      const baseY = p.inLobby ? lobbyTop : top;
+      if (!v.wasPlaced || (v.wasInLobby && !p.inLobby)) {
         v.wasPlaced = true;
         v.spawnT = 0;
-        ringFx(p.x, top + 0.05, p.z, PLAYER_COLORS[p.ci % PLAYER_COLORS.length], 3, 0.7, true);
+        ringFx(p.x, baseY + 0.05, p.z, PLAYER_COLORS[p.ci % PLAYER_COLORS.length], 3, 0.7, true);
       }
+      v.wasInLobby = p.inLobby;
       v.spawnT += dt;
       v.root.scale.setScalar(easeOutBack(Math.min(1, v.spawnT / SPAWN_POP_S)));
       v.root.position.set(p.x, p.y, p.z);
@@ -319,7 +332,7 @@ export function createView(canvas, assets) {
           ringFx(p.x, waterY + 0.05, p.z, 0xffffff, 4, 0.9);
         }
       }
-      v.ring.position.set(p.x, top + 0.03, p.z);
+      v.ring.position.set(p.x, baseY + 0.03, p.z);
       drawLabel(v, p, isMe);
       v.mixer.update(dt);
     }
