@@ -1,6 +1,6 @@
 // Orchestration: menu -> (offline sim | online room) -> match loop. Input, camera aim and HUD wiring.
 import { CONFIG } from '../shared/config.js';
-import { clampPower, normalizeYaw } from '../shared/rules.js';
+import { normalizeYaw, quantizePower } from '../shared/rules.js';
 import { advance, applyInput, createSim, fillWithBots, snapshot } from '../shared/sim.js';
 import { loadAssets } from './assets.js';
 import { createHud } from './hud.js';
@@ -65,12 +65,12 @@ function beginMatchUi() {
 function startOffline() {
   closeSession();
   myId = 'me';
-  const sim = createSim({ grid: assets.grid, players: fillWithBots([{ id: myId, name: playerName(), isBot: false }]) });
+  const sim = createSim({ grid: assets.grid, lobby: assets.lobby, players: fillWithBots([{ id: myId, name: playerName(), isBot: false }]) });
   session = {
     kind: 'offline',
     tick: (dt) => {
       advance(sim, dt);
-      return snapshot(sim);
+      return snapshot(sim, myId); // other players' plans are hidden while planning
     },
     send: (input) => applyInput(sim, myId, input),
   };
@@ -178,18 +178,35 @@ function toggleLock() {
   sendAim({ lock: local.locked });
 }
 
-function nudgePower(delta) {
+// Power moves in whole levels (1..10). Players only ever see the level number.
+function stepPower(dir) {
   if (!canAct(latestState) || local.locked) return;
-  local.power = clampPower(local.power + delta);
+  local.power = quantizePower(local.power + dir / CONFIG.POWER_LEVELS);
 }
 
+let holdDir = 0;
+let holdNextAt = 0;
+
 function pumpInput(dt, state) {
-  if (!canAct(state)) return;
+  if (!canAct(state)) {
+    holdDir = 0;
+    return;
+  }
   if (!local.locked) {
     const up = keys.has('ArrowUp') || keys.has('KeyW');
     const down = keys.has('ArrowDown') || keys.has('KeyS');
     const dir = (up ? 1 : 0) - (down ? 1 : 0) + heldButton;
-    if (dir !== 0) local.power = clampPower(local.power + dir * CONFIG.POWER_RATE_PER_S * dt);
+    const t = performance.now();
+    if (dir !== holdDir) {
+      holdDir = dir;
+      if (dir !== 0) {
+        stepPower(dir);
+        holdNextAt = t + CONFIG.KEY_REPEAT_DELAY_MS;
+      }
+    } else if (dir !== 0 && t >= holdNextAt) {
+      stepPower(dir);
+      holdNextAt = t + CONFIG.KEY_REPEAT_MS;
+    }
     local.aimYaw = local.yaw;
     const changed = local.aimYaw !== lastSent.yaw || local.power !== lastSent.power;
     if (changed && performance.now() - lastSentAt >= INPUT_SEND_MS) sendAim();
@@ -235,7 +252,7 @@ canvas.addEventListener('click', () => {
 });
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
-  nudgePower((e.deltaY < 0 ? 1 : -1) * CONFIG.POWER_WHEEL_STEP);
+  stepPower(e.deltaY < 0 ? 1 : -1);
 }, { passive: false });
 
 const bindHold = (node, dir) => {
