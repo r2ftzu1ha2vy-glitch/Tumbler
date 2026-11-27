@@ -6,8 +6,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { CONFIG } from '../shared/config.js';
-import { readGlbJson, gridFromGltfJson } from '../shared/glb.js';
+import { ASSETS, CONFIG } from '../shared/config.js';
+import { readGlbJson, gridFromGltfJson, lobbyFromGltfJson } from '../shared/glb.js';
 import { PHASE, advance, applyInput, convertToBot, createSim, fillWithBots, snapshot } from '../shared/sim.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -17,6 +17,7 @@ const MSG_PER_SECOND = 80; // per client; input floods are dropped
 
 // The grid is read from the same Grid.glb the client renders, so server and client cannot disagree.
 const grid = gridFromGltfJson(readGlbJson(fs.readFileSync(path.join(ROOT, 'assets', 'Grid.glb'))));
+const lobby = lobbyFromGltfJson(readGlbJson(fs.readFileSync(path.join(ROOT, 'assets', 'Lobby.glb'))), ASSETS.LOBBY_SPAWN_NODE);
 
 const MOUNTS = [
   ['/client/', path.join(ROOT, 'client')],
@@ -157,7 +158,7 @@ function handleStart(client) {
     c.spectator = seated.length >= CONFIG.MAX_PLAYERS;
     if (!c.spectator) seated.push({ id: c.id, name: c.name, isBot: false });
   }
-  room.sim = createSim({ grid, players: fillWithBots(seated, CONFIG) });
+  room.sim = createSim({ grid, lobby, players: fillWithBots(seated, CONFIG) });
   room.lastTick = performance.now();
   room.lastSnap = 0;
   broadcastLobby(room);
@@ -226,14 +227,15 @@ setInterval(() => {
     room.lastTick = now;
     if (now - room.lastSnap >= 1000 / CONFIG.SNAPSHOT_HZ) {
       room.lastSnap = now;
-      const msg = { t: 'snap', s: snapshot(room.sim) };
       if (room.sim.phase === PHASE.GAMEOVER && !room.announcedEnd) {
         room.announcedEnd = true;
         broadcastLobby(room);
       } else if (room.sim.phase !== PHASE.GAMEOVER) {
         room.announcedEnd = false;
       }
-      for (const c of room.clients.values()) send(c.ws, msg);
+      // One snapshot per client: other players' aim/power are hidden while planning.
+      for (const c of room.clients.values()) send(c.ws, { t: 'snap', s: snapshot(room.sim, c.id, false) });
+      room.sim.events = [];
     }
   }
 }, 8);
