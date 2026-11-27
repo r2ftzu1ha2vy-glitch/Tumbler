@@ -3,14 +3,15 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readGlbJson, gridFromGltfJson } from '../shared/glb.js';
-import { CONFIG } from '../shared/config.js';
+import { readGlbJson, gridFromGltfJson, lobbyFromGltfJson } from '../shared/glb.js';
+import { ASSETS, CONFIG } from '../shared/config.js';
 import { isOnGrid, edgeDistance } from '../shared/grid.js';
 import { PHASE, advance, applyInput, createSim, fillWithBots, snapshot, aliveCount, convertToBot } from '../shared/sim.js';
-import { slideDistance, launchSpeed } from '../shared/rules.js';
+import { slideDistance, launchSpeed, quantizePower, powerToLevel } from '../shared/rules.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const grid = gridFromGltfJson(readGlbJson(fs.readFileSync(path.join(root, 'assets', 'Grid.glb'))));
+const lobby = lobbyFromGltfJson(readGlbJson(fs.readFileSync(path.join(root, 'assets', 'Lobby.glb'))), ASSETS.LOBBY_SPAWN_NODE);
 
 // A huge flat grid for measuring slide distance without falling off.
 const bigGrid = { tiles: [{ cx: 0, cz: 0, hx: 500, hz: 500, top: 1.15 }], top: 1.15 };
@@ -245,4 +246,77 @@ test('launchSpeed/slideDistance are inverse under the chosen friction', () => {
   const d = slideDistance(0.8);
   const v = launchSpeed(d);
   assert.ok(Math.abs((v * v) / (2 * CONFIG.FRICTION_MPS2) - d) < 1e-9);
+});
+
+test('power snaps to levels 1..10 (10 % steps) for humans and at launch', () => {
+  assert.equal(quantizePower(0.04), 0.1);
+  assert.equal(quantizePower(0.34), 0.3);
+  assert.equal(quantizePower(0.36), 0.4);
+  assert.equal(quantizePower(7), 1);
+  assert.equal(powerToLevel(0.3), 3);
+  assert.equal(powerToLevel(1), 10);
+  const sim = planned({ spots: [{ x: -3, z: 0 }, { x: 3, z: 0 }] });
+  applyInput(sim, 'h1', { power: 0.57 });
+  assert.equal(sim.players[0].power, 0.6);
+  // bots only ever pick whole levels too
+  const bots = createSim({ grid, players: fillWithBots([]).map((p) => ({ ...p, isBot: true })), seed: 3 });
+  run(bots, 5.2);
+  for (const p of bots.players) assert.equal(Math.round(p.bot.power * 10) / 10, p.bot.power);
+});
+
+test("other players' aim and power are hidden while planning, revealed once sliding", () => {
+  const sim = createSim({ grid, lobby, players: fillWithBots(humans(1)), seed: 11 });
+  run(sim, 5.1);
+  assert.equal(sim.phase, PHASE.PLANNING);
+  applyInput(sim, 'h1', { yaw: 1.0, power: 0.9 });
+  const bot = sim.players[1];
+  bot.bot.yaw = 2.2; // a bot's real plan
+  bot.yaw = 2.2;
+  bot.power = 0.8;
+  const mine = snapshot(sim, 'h1', false);
+  assert.equal(mine.players[0].yaw, 1);
+  assert.equal(mine.players[0].power, 0.9);
+  for (const p of mine.players.slice(1)) {
+    assert.equal(p.power, 0, 'leaked power');
+    assert.ok(Math.abs(p.yaw - sim.players.find((q) => q.id === p.id).faceYaw) < 1e-3, 'leaked aim');
+  }
+  const spectator = snapshot(sim, 'nobody', false);
+  assert.ok(spectator.players.every((p) => p.power === 0));
+  // once sliding, everyone is visible
+  for (const p of sim.players) p.locked = true;
+  advance(sim, 1 / 60);
+  assert.equal(sim.phase, PHASE.SLIDING);
+  const open = snapshot(sim, 'h1', false);
+  assert.equal(open.players[1].yaw, bot.yaw);
+});
+
+test('Lobby.glb: Spawn_Lobby is a 15 x 10 m platform with top y=0.7; rotated Shop marker is tolerated', () => {
+  assert.ok(Math.abs(lobby.spawn.hx - 7.5) < 1e-6 && Math.abs(lobby.spawn.hz - 5) < 1e-6);
+  assert.ok(Math.abs(lobby.spawn.top - 0.7) < 1e-6);
+  assert.ok(lobby.nodes.includes('Map Selection') && lobby.nodes.includes('Shop'));
+});
+
+test('countdown: ducks spawn 3 m above the lobby platform, drop onto it, then teleport to the grid', () => {
+  const sim = createSim({ grid, lobby, players: fillWithBots(humans(1)), seed: 21 });
+  const s = lobby.spawn;
+  for (const p of sim.players) {
+    assert.ok(p.inLobby && p.placed);
+    assert.ok(Math.abs(p.y - (s.top + CONFIG.LOBBY_SPAWN_DROP_M)) < 1e-9, 'not spawned above the platform');
+    assert.ok(Math.abs(p.x - s.cx) <= s.hx && Math.abs(p.z - s.cz) <= s.hz, 'spawned off the platform');
+  }
+  for (let i = 0; i < 5; i++) for (let j = i + 1; j < 5; j++) {
+    assert.ok(Math.hypot(sim.players[i].x - sim.players[j].x, sim.players[i].z - sim.players[j].z) >= CONFIG.SPAWN_MIN_SEPARATION_M - 1e-9);
+  }
+  run(sim, 1.5);
+  assert.equal(sim.phase, PHASE.COUNTDOWN);
+  assert.ok(sim.players.every((p) => p.y === s.top && p.inLobby), 'ducks should have landed on the platform');
+  run(sim, 3.7);
+  assert.equal(sim.phase, PHASE.PLANNING);
+  for (const p of sim.players) {
+    assert.equal(p.inLobby, false);
+    assert.equal(p.y, grid.top);
+    assert.ok(isOnGrid(grid, p.x, p.z));
+  }
+  const snap = snapshot(sim);
+  assert.ok(snap.players.every((p) => p.inLobby === false));
 });
