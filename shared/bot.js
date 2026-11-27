@@ -4,7 +4,7 @@
 // Plan: pick an opponent to hit, aim at them, and size the power so that the hit leaves enough speed
 // to carry them over the nearest edge on that line. Never plan a slide whose unobstructed end point is
 // off the grid (unless the match has dragged on), and fall back to "go toward the middle".
-import { clampPower, lerpAngle, normalizeYaw } from './rules.js';
+import { lerpAngle, normalizeYaw, quantizePower } from './rules.js';
 import { edgeDistance, rayExitDistance } from './grid.js';
 
 function decide(sim, p) {
@@ -56,7 +56,7 @@ function decide(sim, p) {
   for (const c of cands) if (c.score < best.score) best = c;
   return {
     yaw: normalizeYaw(best.yaw + rng.range(-cfg.BOT_AIM_ERR_RAD, cfg.BOT_AIM_ERR_RAD)),
-    power: clampPower(best.D / cfg.MAX_SLIDE_M + rng.range(-cfg.BOT_POWER_ERR, cfg.BOT_POWER_ERR), cfg),
+    power: quantizePower(best.D / cfg.MAX_SLIDE_M + rng.range(-cfg.BOT_POWER_ERR, cfg.BOT_POWER_ERR), cfg),
   };
 }
 
