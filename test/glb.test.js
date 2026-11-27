@@ -52,3 +52,16 @@ test('rotated collision nodes are refused', () => {
   };
   assert.throws(() => gridFromGltfJson(json), /rotated/);
 });
+
+test('Lobby.glb: reader tolerates the rotated Shop marker but still refuses it as collision geometry', async () => {
+  const { lobbyFromGltfJson } = await import('../shared/glb.js');
+  const json = readGlbJson(read('Lobby.glb'));
+  const lobby = lobbyFromGltfJson(json, 'Spawn_Lobby');
+  near(lobby.spawn.cx, 0);
+  near(lobby.spawn.cz, 0);
+  near(lobby.spawn.hx, 7.5);
+  near(lobby.spawn.hz, 5);
+  near(lobby.spawn.top, 0.7);
+  assert.throws(() => gridFromGltfJson(json), /Shop.*rotated/);
+  assert.throws(() => lobbyFromGltfJson(json, 'Nope'), /no mesh node/);
+});
