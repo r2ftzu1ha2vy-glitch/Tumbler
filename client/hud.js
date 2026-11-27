@@ -1,7 +1,6 @@
 // DOM overlay: menu, lobby, in-game HUD (banner, roster, power bar), end card.
 // Pure presentation: it is told what to show and reports button clicks through `el`.
 import { CONFIG, PLAYER_COLORS } from '../shared/config.js';
-import { slideDistance } from '../shared/rules.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -9,7 +8,7 @@ export function createHud() {
   const el = {
     hud: $('hud'), menu: $('menu'), lobby: $('lobby'), end: $('end'), fatal: $('fatal'),
     phase: $('phase'), sub: $('sub'), timerfill: $('timerfill'), roster: $('roster'),
-    power: $('power'), pwUp: $('pwUp'), pwDown: $('pwDown'), pwFill: $('pwFill'), pwPct: $('pwPct'), pwDist: $('pwDist'),
+    power: $('power'), pwUp: $('pwUp'), pwDown: $('pwDown'), pwFill: $('pwFill'), pwPct: $('pwPct'),
     launch: $('launch'), bigcount: $('bigcount'),
     nameInput: $('nameInput'), codeInput: $('codeInput'), btnOffline: $('btnOffline'), btnCreate: $('btnCreate'),
     btnJoin: $('btnJoin'), menuStatus: $('menuStatus'),
@@ -156,10 +155,10 @@ export function createHud() {
 
     const canAct = !!me && me.alive && state.phase === 'planning';
     el.power.classList.toggle('disabled', !canAct || ctx.locked);
-    const pct = `${Math.round(ctx.power * 100)}%`;
-    setText('pct', el.pwPct, pct);
-    setText('dist', el.pwDist, `${slideDistance(ctx.power).toFixed(1)} m`);
-    el.pwFill.style.height = pct;
+    // Players see a level 1..10 only (never a percentage or a distance).
+    const level = Math.round(ctx.power * CONFIG.POWER_LEVELS);
+    setText('pct', el.pwPct, String(level));
+    el.pwFill.style.height = `${(level / CONFIG.POWER_LEVELS) * 100}%`;
     el.pwFill.style.background = `hsl(${Math.round((1 - ctx.power) * 95)} 85% 55%)`;
     setText('launch', el.launch.firstChild, ctx.locked && canAct ? 'Unlock ' : 'Launch ');
     el.launch.disabled = !canAct;
